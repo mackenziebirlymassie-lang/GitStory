@@ -1,0 +1,34 @@
+{
+  "name": "gitstory",
+  "version": "0.1.0",
+  "description": "Interactive Git Repository Chronicle & Timeline Visualizer",
+  "main": "server/index.js",
+  "bin": {
+    "gitstory": "./bin/gitstory.js"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run server:dev\" \"npm run client:dev\"",
+    "client:dev": "npm --prefix client run dev",
+    "client:build": "npm --prefix client run build",
+    "server:dev": "node --watch server/index.js",
+    "start": "node server/index.js"
+  },
+  "keywords": [
+    "git",
+    "visualization",
+    "timeline",
+    "history",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "commander": "^15.0.0",
+    "concurrently": "^10.0.6",
+    "cors": "^2.8.6",
+    "express": "^5.3.0",
+    "open": "^11.0.4",
+    "simple-git": "^4.0.2"
+  }
+}
