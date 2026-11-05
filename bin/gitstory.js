@@ -2,6 +2,7 @@
 
 import { Command } from 'commander';
 import path from 'path';
+import fs from 'fs';
 import { startServer } from '../server/index.js';
 
 const program = new Command();
@@ -18,11 +19,26 @@ program
     const port = parseInt(options.port, 10);
     const shouldOpen = options.open;
 
-    await startServer({
-      repoPath: targetDir,
-      port,
-      openBrowser: shouldOpen
-    });
+    if (!fs.existsSync(targetDir)) {
+      console.error(`\n❌ Error: Directory not found: ${targetDir}\n`);
+      process.exit(1);
+    }
+
+    const stat = fs.statSync(targetDir);
+    if (!stat.isDirectory()) {
+      console.error(`\n❌ Error: Specified path is not a directory: ${targetDir}\n`);
+      process.exit(1);
+    }
+
+    try {
+      await startServer({
+        repoPath: targetDir,
+        port,
+        openBrowser: shouldOpen
+      });
+    } catch {
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);

@@ -65,8 +65,8 @@ export async function startServer({
     }
   });
 
-  // Client SPA fallback
-  app.get("*", (req, res) => {
+  // Client SPA fallback (Express 5 compatible)
+  app.use((req, res) => {
     res.sendFile(path.join(clientDist, "index.html"), (err) => {
       if (err) {
         res.status(200).send(`
@@ -80,7 +80,7 @@ export async function startServer({
     });
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = app.listen(port, () => {
       const url = `http://localhost:${port}`;
       console.log(`\n📖 GitStory running at: ${url}`);
@@ -89,6 +89,16 @@ export async function startServer({
         open(url).catch(() => {});
       }
       resolve(server);
+    });
+
+    server.on("error", (err) => {
+      if (err.code === "EADDRINUSE") {
+        console.error(`\n❌ Port ${port} is already in use.`);
+        console.error(`Try specifying a different port using --port <number>.\n`);
+      } else {
+        console.error(`\n❌ Server error:`, err.message);
+      }
+      reject(err);
     });
   });
 }

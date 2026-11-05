@@ -44,36 +44,53 @@ export async function getCommits(repoPath, { limit = 100, branch = null } = {}) 
     }
   };
 
-  if (branch) {
-    options.from = branch;
+  try {
+    // When a branch is specified, pass it as a positional argument ref rather than options.from
+    const logResult = branch 
+      ? await git.log([branch], options)
+      : await git.log(options);
+
+    return (logResult?.all || []).map(commit => ({
+      ...commit,
+      parents: commit.parentHashes ? commit.parentHashes.split(' ').filter(Boolean) : []
+    }));
+  } catch (err) {
+    // Handle newly initialized or empty repository gracefully
+    if (/does not have any commits yet|unknown revision|fatal: your current branch/i.test(err.message)) {
+      return [];
+    }
+    throw err;
   }
-
-  const logResult = await git.log(options);
-
-  return logResult.all.map(commit => ({
-    ...commit,
-    parents: commit.parentHashes ? commit.parentHashes.split(' ').filter(Boolean) : []
-  }));
 }
 
 export async function getBranches(repoPath) {
   const git = getGit(repoPath);
-  const branchSummary = await git.branchLocal();
-  return {
-    current: branchSummary.current,
-    all: branchSummary.all,
-    branches: branchSummary.branches
-  };
+  try {
+    const branchSummary = await git.branchLocal();
+    return {
+      current: branchSummary.current || '',
+      all: branchSummary.all || [],
+      branches: branchSummary.branches || {}
+    };
+  } catch {
+    return {
+      current: '',
+      all: [],
+      branches: {}
+    };
+  }
 }
 
-export async function getFileChurn(repoPath, { top = 20 } = {}) {
+export async function getFileChurn(repoPath, { top = 20, maxCommits = 1000 } = {}) {
   const git = getGit(repoPath);
   try {
     const rawLog = await git.raw([
       'log',
       '--name-only',
       '--pretty=format:',
-      '--no-merges'
+      '--no-merges',
+      '-n',
+      `${maxCommits}`
     ]);
 
     const lines = rawLog.split('\n').map(l => l.trim()).filter(Boolean);
