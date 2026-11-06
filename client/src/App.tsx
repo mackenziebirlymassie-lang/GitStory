@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { GitBranch, GitCommit, FileText, Layers, RefreshCw, Clock, ArrowRight, AlertCircle, Copy, Check } from 'lucide-react';
+import { computeGitGraph, type CommitItem } from './utils/gitGraph';
 
 interface RepoOverview {
   repoName: string;
@@ -11,19 +12,14 @@ interface RepoOverview {
   modifiedFiles: number;
 }
 
-interface CommitItem {
-  hash: string;
-  shortHash: string;
-  date: string;
-  message: string;
-  author_name: string;
-  parents: string[];
-}
-
 interface ChurnItem {
   path: string;
   churnCount: number;
 }
+
+const ROW_HEIGHT = 72;
+const LANE_WIDTH = 22;
+const OFFSET_X = 18;
 
 export function App() {
   const [overview, setOverview] = useState<RepoOverview | null>(null);
@@ -36,6 +32,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'timeline' | 'churn'>('timeline');
   const [copiedHash, setCopiedHash] = useState(false);
+
+  const graph = useMemo(() => {
+    return computeGitGraph(commits, ROW_HEIGHT, LANE_WIDTH, OFFSET_X);
+  }, [commits]);
 
   const fetchData = useCallback(async (branchToFetch?: string) => {
     setLoading(true);
@@ -214,8 +214,8 @@ export function App() {
       <main style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {activeTab === 'timeline' ? (
           <>
-            {/* Commit Timeline Stream */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', borderRight: '1px solid #1e293b' }}>
+            {/* Commit Timeline Stream with SVG Graph */}
+            <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', padding: '1rem', borderRight: '1px solid #1e293b' }}>
               {commits.length === 0 ? (
                 <div style={{ padding: '3rem', textAlign: 'center', color: '#64748b' }}>
                   <GitCommit size={36} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
@@ -223,37 +223,207 @@ export function App() {
                   <p style={{ fontSize: '0.85rem' }}>This branch or repository currently has no recorded commits.</p>
                 </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  {commits.map((c) => {
-                    const isSelected = selectedCommit?.hash === c.hash;
-                    return (
-                      <div 
-                        key={c.hash} 
-                        onClick={() => setSelectedCommit(c)}
-                        style={{
-                          padding: '1rem',
-                          borderRadius: '8px',
-                          background: isSelected ? '#1e293b' : '#0f172a',
-                          border: isSelected ? '1px solid #38bdf8' : '1px solid #1e293b',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
-                          <span style={{ fontFamily: 'monospace', fontSize: '0.8rem', background: '#0b1329', padding: '0.2rem 0.4rem', borderRadius: '4px', color: '#38bdf8' }}>
-                            {c.shortHash}
-                          </span>
-                          <span style={{ fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                            <Clock size={12} /> {formatDate(c.date)}
-                          </span>
+                <div style={{ display: 'flex', minWidth: 'min-content', position: 'relative' }}>
+                  {/* SVG Git Graph Lanes & Connections */}
+                  <svg
+                    width={graph.totalWidth}
+                    height={graph.totalHeight}
+                    style={{ flexShrink: 0, overflow: 'visible', userSelect: 'none' }}
+                  >
+                    {/* Graph Connections */}
+                    {graph.connections.map((conn, idx) => (
+                      <path
+                        key={`conn-${idx}-${conn.parentHash}`}
+                        d={conn.d}
+                        stroke={conn.color}
+                        strokeWidth={2.5}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        fill="none"
+                        opacity={0.8}
+                      />
+                    ))}
+
+                    {/* Graph Nodes */}
+                    {graph.nodes.map((node) => {
+                      const isSelected = selectedCommit?.hash === node.commit.hash;
+                      return (
+                        <g
+                          key={`node-${node.commit.hash}`}
+                          onClick={() => setSelectedCommit(node.commit)}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <title>{`${node.commit.shortHash} - ${node.commit.message} (${node.commit.author_name})`}</title>
+
+                          {/* Outer Selection Ring */}
+                          {isSelected && (
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={10}
+                              fill="none"
+                              stroke="#38bdf8"
+                              strokeWidth={2}
+                              opacity={0.9}
+                            />
+                          )}
+
+                          {/* Commit Node Body */}
+                          <circle
+                            cx={node.x}
+                            cy={node.y}
+                            r={node.isMerge ? 5.5 : 4.5}
+                            fill={node.isMerge ? '#090d16' : node.color}
+                            stroke={node.color}
+                            strokeWidth={node.isMerge ? 2.5 : 2}
+                          />
+
+                          {/* Merge Commit Center Indicator */}
+                          {node.isMerge && (
+                            <circle
+                              cx={node.x}
+                              cy={node.y}
+                              r={2}
+                              fill={node.color}
+                            />
+                          )}
+                        </g>
+                      );
+                    })}
+                  </svg>
+
+                  {/* Commit Cards List */}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: '400px' }}>
+                    {commits.map((c) => {
+                      const isSelected = selectedCommit?.hash === c.hash;
+                      return (
+                        <div
+                          key={c.hash}
+                          style={{
+                            height: `${ROW_HEIGHT}px`,
+                            boxSizing: 'border-box',
+                            padding: '4px 6px',
+                            display: 'flex',
+                            alignItems: 'center'
+                          }}
+                        >
+                          <div
+                            onClick={() => setSelectedCommit(c)}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              padding: '0.45rem 0.75rem',
+                              borderRadius: '6px',
+                              background: isSelected ? '#1e293b' : '#0f172a',
+                              border: isSelected ? '1px solid #38bdf8' : '1px solid #1e293b',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              boxSizing: 'border-box',
+                              transition: 'background 0.15s ease, border-color 0.15s ease'
+                            }}
+                          >
+                            {/* Top row: shortHash, refs tags, date */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', overflow: 'hidden' }}>
+                                <span
+                                  style={{
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.75rem',
+                                    background: '#0b1329',
+                                    padding: '0.15rem 0.35rem',
+                                    borderRadius: '4px',
+                                    color: '#38bdf8',
+                                    flexShrink: 0
+                                  }}
+                                >
+                                  {c.shortHash}
+                                </span>
+
+                                {c.refs && c.refs.length > 0 && (
+                                  <div style={{ display: 'flex', gap: '0.25rem', overflow: 'hidden' }}>
+                                    {c.refs.slice(0, 2).map((ref) => {
+                                      const isHead = ref.includes('HEAD') || ref.includes('main') || ref.includes('master');
+                                      return (
+                                        <span
+                                          key={ref}
+                                          style={{
+                                            fontSize: '0.68rem',
+                                            padding: '0.1rem 0.35rem',
+                                            borderRadius: '4px',
+                                            background: isHead ? '#064e3b' : '#312e81',
+                                            color: isHead ? '#34d399' : '#a5b4fc',
+                                            whiteSpace: 'nowrap',
+                                            textOverflow: 'ellipsis',
+                                            overflow: 'hidden',
+                                            maxWidth: '140px'
+                                          }}
+                                          title={ref}
+                                        >
+                                          {ref}
+                                        </span>
+                                      );
+                                    })}
+                                    {c.refs.length > 2 && (
+                                      <span style={{ fontSize: '0.65rem', color: '#64748b' }}>
+                                        +{c.refs.length - 2}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  color: '#64748b',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.25rem',
+                                  flexShrink: 0
+                                }}
+                              >
+                                <Clock size={11} /> {formatDate(c.date)}
+                              </span>
+                            </div>
+
+                            {/* Bottom row: commit message & author */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem' }}>
+                              <p
+                                style={{
+                                  margin: 0,
+                                  fontWeight: 500,
+                                  fontSize: '0.85rem',
+                                  color: '#f1f5f9',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  flex: 1
+                                }}
+                                title={c.message}
+                              >
+                                {c.message}
+                              </p>
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  color: '#94a3b8',
+                                  flexShrink: 0,
+                                  maxWidth: '130px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {c.author_name}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <p style={{ margin: 0, fontWeight: 500, fontSize: '0.95rem', color: '#f1f5f9' }}>{c.message}</p>
-                        <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>
-                          {c.author_name}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -291,14 +461,43 @@ export function App() {
                         {selectedCommit.message}
                       </div>
                     </div>
+                    {selectedCommit.refs && selectedCommit.refs.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Refs & Branches</div>
+                        <div style={{ display: 'flex', gap: '0.35rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
+                          {selectedCommit.refs.map(r => (
+                            <span key={r} style={{ fontSize: '0.75rem', background: '#1e293b', color: '#38bdf8', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                              {r}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {selectedCommit.parents.length > 0 && (
                       <div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Parent Commits</div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Parent Commits (Click to Jump)</div>
                         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
                           {selectedCommit.parents.map(p => (
-                            <span key={p} style={{ fontSize: '0.75rem', background: '#1e293b', padding: '0.2rem 0.5rem', borderRadius: '4px', fontFamily: 'monospace' }}>
+                            <button
+                              key={p}
+                              onClick={() => {
+                                const parent = commits.find(c => c.hash.startsWith(p) || p.startsWith(c.hash));
+                                if (parent) setSelectedCommit(parent);
+                              }}
+                              style={{
+                                fontSize: '0.75rem',
+                                background: '#1e293b',
+                                color: '#38bdf8',
+                                border: '1px solid #334155',
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                fontFamily: 'monospace',
+                                cursor: 'pointer'
+                              }}
+                              title="Jump to parent commit in history"
+                            >
                               {p.substring(0, 7)}
-                            </span>
+                            </button>
                           ))}
                         </div>
                       </div>

@@ -40,20 +40,30 @@ export async function getCommits(repoPath, { limit = 100, branch = null } = {}) 
       message: '%s',
       author_name: '%an',
       author_email: '%ae',
-      parentHashes: '%P'
+      parentHashes: '%P',
+      refs: '%D'
     }
   };
 
   try {
-    // When a branch is specified, pass it as a positional argument ref rather than options.from
-    const logResult = branch 
-      ? await git.log([branch], options)
-      : await git.log(options);
+    // When a specific branch is requested use it, otherwise use --all to construct the full graph
+    const args = branch && branch !== 'all' ? [branch] : ['--all'];
+    const logResult = await git.log(args, options);
 
-    return (logResult?.all || []).map(commit => ({
-      ...commit,
-      parents: commit.parentHashes ? commit.parentHashes.split(' ').filter(Boolean) : []
-    }));
+    return (logResult?.all || []).map(commit => {
+      const rawRefs = commit.refs
+        ? commit.refs
+            .split(',')
+            .map(r => r.trim())
+            .filter(Boolean)
+        : [];
+
+      return {
+        ...commit,
+        refs: rawRefs,
+        parents: commit.parentHashes ? commit.parentHashes.split(' ').filter(Boolean) : []
+      };
+    });
   } catch (err) {
     // Handle newly initialized or empty repository gracefully
     if (/does not have any commits yet|unknown revision|fatal: your current branch/i.test(err.message)) {
